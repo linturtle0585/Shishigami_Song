@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>獅子神レオナ 歌枠曲目出現次數視覺化分析</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- WordCloud2.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
+
+  <div class="max-w-7xl mx-auto space-y-8">
+    
+    <!-- 頁面標題 -->
+    <header class="border-b border-slate-700 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold text-amber-400">🦁 獅子神レオナ 歌枠 Track Visualizer</h1>
+        <p class="text-slate-400 text-sm mt-1">歌詞/歌枠目錄數據分析與歌曲時間軸直達工具</p>
+      </div>
+      <!-- 載入狀態標示 -->
+      <div id="statusMessage" class="text-xs px-3 py-1.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 self-start md:self-auto">
+        ⏳ 正在讀取 JSON 數據...
+      </div>
+    </header>
+
+    <!-- 關鍵指標卡片 -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-lg">
+        <div class="text-slate-400 text-xs font-semibold uppercase">分析直播場次</div>
+        <div id="stat-videos" class="text-3xl font-bold text-white mt-1">-</div>
+      </div>
+      <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-lg">
+        <div class="text-slate-400 text-xs font-semibold uppercase">總演唱歌曲數</div>
+        <div id="stat-total" class="text-3xl font-bold text-amber-400 mt-1">-</div>
+      </div>
+      <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-lg">
+        <div class="text-slate-400 text-xs font-semibold uppercase">不重複歌曲數</div>
+        <div id="stat-unique" class="text-3xl font-bold text-emerald-400 mt-1">-</div>
+      </div>
+      <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-lg">
+        <div class="text-slate-400 text-xs font-semibold uppercase">最常演唱歌曲</div>
+        <div id="stat-top" class="text-lg font-bold text-rose-400 mt-1 truncate">-</div>
+      </div>
+    </section>
+
+    <!-- 視覺化區域：文字雲 -->
+    <section class="bg-slate-800 border border-slate-700 p-6 rounded-xl shadow-lg relative">
+      <h2 class="text-xl font-bold text-slate-200 mb-4">☁️ 熱門歌曲文字雲 (Word Cloud)</h2>
+      
+      <!-- 文字雲畫布容器 -->
+      <div class="relative w-full h-[400px] bg-slate-900/50 rounded-lg overflow-hidden flex items-center justify-center">
+        <canvas id="wordCloudCanvas" class="w-full h-full"></canvas>
+        <!-- 滑鼠 Hover 浮動提示框 (Tooltip) -->
+        <div id="tooltip" class="absolute pointer-events-none hidden bg-slate-900 border border-amber-400 text-amber-300 text-sm px-3 py-1.5 rounded-lg shadow-xl z-50 transition-opacity duration-150"></div>
+      </div>
+    </section>
+
+    <!-- 歌曲搜尋與直播列表展開區塊 -->
+    <section class="bg-slate-800 border border-slate-700 p-6 rounded-xl shadow-lg space-y-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-700 pb-4">
+        <div>
+          <h2 class="text-xl font-bold text-slate-200">🔍 歌曲搜尋與時間軸清單</h2>
+          <p class="text-xs text-slate-400 mt-1">搜尋歌曲並點擊卡片，可展開查看該曲目出現的所有直播場次與時間點連結</p>
+        </div>
+        <!-- 搜尋框 -->
+        <div class="relative w-full md:w-80">
+          <input type="text" id="searchInput" placeholder="輸入歌曲名稱搜尋..." 
+                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 transition-colors">
+        </div>
+      </div>
+
+      <!-- 歌曲結果卡片列表 (動態生成) -->
+      <div id="songListContainer" class="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+        <!-- 展開式卡片會在這裡動態渲染 -->
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const JSON_FILE_PATH = 'koyori_setlists_2.json';
+    let globalSongMap = {}; // 存儲彙整後的歌曲資料 { title: { title, count, occurrences: [...] } }
+
+    // 清理歌名（去除時間戳記與特殊空白）
+    function cleanTitle(title) {
+      if (!title) return "";
+      return title
+        .replace(/\d{1,2}:\d{2}/g, '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .trim();
+    }
+
+    // 將時間格式 (HH:MM:SS 或 MM:SS) 轉換為總秒數 (以利 YouTube ?t=秒數 播放)
+    function timeToSeconds(timeStr) {
+      if (!timeStr) return 0;
+      const clean = timeStr.replace(/[^0-9:]/g, '');
+      const parts = clean.split(':').map(Number);
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        return parts[0] * 60 + parts[1];
+      }
+      return 0;
+    }
+
+    // 載入 JSON 資料
+    async function loadData() {
+      const statusEl = document.getElementById('statusMessage');
+      try {
+        const response = await fetch(JSON_FILE_PATH);
+        if (!response.ok) {
+          throw new Error(`HTTP 錯誤！狀態碼: ${response.status}`);
+        }
+        const rawStreams = await response.json();
+        
+        statusEl.className = "text-xs px-3 py-1.5 rounded-full bg-emerald-900/50 text-emerald-400 border border-emerald-700";
+        statusEl.innerText = `✅ 已成功載入資料 (${JSON_FILE_PATH})`;
+
+        initDashboard(rawStreams);
+      } catch (error) {
+        console.error('無法讀取 JSON 資料:', error);
+        statusEl.className = "text-xs px-3 py-1.5 rounded-full bg-rose-900/50 text-rose-400 border border-rose-700";
+        statusEl.innerText = `❌ 載入失敗: 請確認已使用 Web 伺服器開啟網頁 (CORS 限制)`;
+      }
+    }
+
+    // 初始化儀表板
+    function initDashboard(rawStreams) {
+      globalSongMap = {};
+      let totalTrackCount = 0;
+
+      // 整理並索引資料
+      rawStreams.forEach(stream => {
+        const streamTitle = stream.title || "未知直播標題";
+        const videoId = stream.video_id || "";
+
+        if (stream.tracks && Array.isArray(stream.tracks)) {
+          stream.tracks.forEach(track => {
+            const title = cleanTitle(track.title);
+            if (title && title !== "🎸") {
+              if (!globalSongMap[title]) {
+                globalSongMap[title] = {
+                  title: title,
+                  count: 0,
+                  occurrences: []
+                };
+              }
+              
+              const seconds = timeToSeconds(track.timestamp);
+              globalSongMap[title].count++;
+              globalSongMap[title].occurrences.push({
+                streamTitle: streamTitle,
+                videoId: videoId,
+                timestamp: track.timestamp,
+                seconds: seconds
+              });
+
+              totalTrackCount++;
+            }
+          });
+        }
+      });
+
+      // 轉換為陣列並按次數降序排序
+      const sortedSongs = Object.values(globalSongMap).sort((a, b) => b.count - a.count);
+
+      // 填入關鍵指標
+      document.getElementById('stat-videos').innerText = rawStreams.length;
+      document.getElementById('stat-total').innerText = totalTrackCount;
+      document.getElementById('stat-unique').innerText = sortedSongs.length;
+      document.getElementById('stat-top').innerText = sortedSongs[0] ? `${sortedSongs[0].title} (${sortedSongs[0].count}次)` : '-';
+
+      // 繪製文字雲
+      renderWordCloud(sortedSongs);
+
+      // 渲染歌曲搜尋列表
+      renderSongSearchList(sortedSongs);
+
+      // 搜尋事件監聽
+      document.getElementById('searchInput').addEventListener('input', (e) => {
+        const keyword = e.target.value.toLowerCase().trim();
+        const filtered = sortedSongs.filter(song => song.title.toLowerCase().includes(keyword));
+        renderSongSearchList(filtered);
+      });
+    }
+
+    // 繪製文字雲
+    function renderWordCloud(songs) {
+      const canvas = document.getElementById('wordCloudCanvas');
+      const tooltip = document.getElementById('tooltip');
+      const container = canvas.parentElement;
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const listData = songs.slice(0, 100).map(item => [item.title, item.count]);
+      const colors = ['#f59e0b', '#38bdf8', '#34d399', '#f43f5e', '#a78bfa', '#fbbf24', '#f472b6'];
+
+      WordCloud(canvas, {
+        list: listData,
+        gridSize: 12,
+        weightFactor: function (size) {
+          const maxCount = songs[0] ? songs[0].count : 1;
+          return Math.max(14, (size / maxCount) * 50 + 10);
+        },
+        fontFamily: 'sans-serif',
+        color: function () {
+          return colors[Math.floor(Math.random() * colors.length)];
+        },
+        rotateRatio: 0.15,
+        backgroundColor: 'transparent',
+        hover: function (item, dimension, event) {
+          if (item) {
+            canvas.style.cursor = 'pointer';
+            tooltip.style.display = 'block';
+            tooltip.innerText = `${item[0]}：${item[1]}次`;
+
+            const rect = container.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            tooltip.style.left = `${x + 15}px`;
+            tooltip.style.top = `${y + 15}px`;
+          } else {
+            canvas.style.cursor = 'default';
+            tooltip.style.display = 'none';
+          }
+        }
+      });
+    }
+
+    // 渲染歌曲搜尋與展開式列表
+    function renderSongSearchList(songs) {
+      const container = document.getElementById('songListContainer');
+      container.innerHTML = '';
+
+      if (songs.length === 0) {
+        container.innerHTML = `<div class="text-center py-8 text-slate-500">🔍 找不到符合條件的歌曲</div>`;
+        return;
+      }
+
+      songs.forEach((song, index) => {
+        const card = document.createElement('div');
+        card.className = 'bg-slate-900 border border-slate-700/80 rounded-lg overflow-hidden transition-all';
+
+        // 卡片標題區 (點擊展開/收合)
+        const header = document.createElement('div');
+        header.className = 'p-4 flex items-center justify-between cursor-pointer hover:bg-slate-800/80 transition-colors select-none';
+        header.innerHTML = `
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-mono px-2 py-1 bg-slate-800 text-slate-400 rounded">#${index + 1}</span>
+            <span class="font-bold text-white text-base">${song.title}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/30 font-semibold">
+              演唱 ${song.count} 次
+            </span>
+            <span class="text-slate-400 text-sm transform transition-transform duration-200 arrow-icon">▼</span>
+          </div>
+        `;
+
+        // 展開內容區 (預設隱藏)
+        const content = document.createElement('div');
+        content.className = 'hidden border-t border-slate-800 bg-slate-950/50 p-4 space-y-2';
+
+        // 填入該歌曲出現過的所有直播細節
+        song.occurrences.forEach(occ => {
+          const ytUrl = `https://youtu.be/${occ.videoId}?t=${occ.seconds}`;
+          const item = document.createElement('div');
+          item.className = 'flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-900/90 border border-slate-800 rounded-md hover:border-slate-700 transition-colors';
+          item.innerHTML = `
+            <div class="text-sm text-slate-300 font-medium truncate max-w-2xl" title="${occ.streamTitle}">
+              📺 ${occ.streamTitle}
+            </div>
+            <a href="${ytUrl}" target="_blank" rel="noopener noreferrer" 
+               class="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/30 text-xs font-semibold hover:bg-amber-500 hover:text-slate-900 transition-all shrink-0">
+               <span>⏱️ ${occ.timestamp}</span>
+               <span>▶ 播放</span>
+            </a>
+          `;
+          content.appendChild(item);
+        });
+
+        // 點擊事件：切換展開/收合狀態
+        header.addEventListener('click', () => {
+          const isHidden = content.classList.contains('hidden');
+          const arrow = header.querySelector('.arrow-icon');
+          
+          if (isHidden) {
+            content.classList.remove('hidden');
+            arrow.style.transform = 'rotate(180deg)';
+          } else {
+            content.classList.add('hidden');
+            arrow.style.transform = 'rotate(0deg)';
+          }
+        });
+
+        card.appendChild(header);
+        card.appendChild(content);
+        container.appendChild(card);
+      });
+    }
+
+    window.addEventListener('DOMContentLoaded', loadData);
+  </script>
+</body>
+</html>
