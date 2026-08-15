@@ -76,29 +76,31 @@ def get_playlist_videos(playlist_url):
                 video_list.append({'title': title, 'video_id': video_id})
     return video_list
 
-# ---------------- 執行與儲存區 ----------------
-results = []
-playlist_url = 'https://www.youtube.com/playlist?list=PLCxKJRIVDrYFq6J6_viDaeRKv7z55LXf7'
-videos = get_playlist_videos(playlist_url)
-for video in tqdm(videos):
-    video_id = video['video_id']
-    results.append(extract_setlist_comments(video_id))
-none_tracks_list = [item for item in results if item.get("tracks") is None]
-tracks_list = []
-for none_track in tqdm(none_tracks_list):
-    video_id = none_track['video_id']
-    tracks_list.append(extract_setlist_comments(video_id))
-final_results = [item for item in results if item.get("tracks") is not None]
-final_results.extend([item for item in tracks_list if item.get("tracks") is not None])
-video_map = {v["video_id"]: v.get("title") for v in videos if "video_id" in v}
-for item in final_results:
-    item.pop("raw_text", None)
-    video_id = item.get("video_id")
-    if video_id in video_map:
-        item["title"] = video_map[video_id]
-
-# 儲存為 JSON
-json_filename = 'youtube_setlists.json'
-with open(json_filename, 'w', encoding='utf-8') as f:
-    json.dump(final_results, f, ensure_ascii=False)
-print(f"\n已順利將結果儲存至 `{json_filename}`")
+# ---------------- 執行區 ----------------
+def main():
+    results = []
+    playlist_url = 'https://www.youtube.com/playlist?list=PLTUPXbT5Ni8zmczjbAriHiGYeJAPxoT8g'
+    videos = get_playlist_videos(playlist_url)
+    for video in tqdm(videos):
+        video_id = video['video_id']
+        results.append(extract_setlist_comments(video_id))
+    none_tracks_list = [item for item in results if item.get("tracks") is None]
+    tracks_list = []
+    for none_track in tqdm(none_tracks_list):
+        video_id = none_track['video_id']
+        tracks_list.append(extract_setlist_comments(video_id))
+    final_results = [item for item in results if item.get("tracks") is not None]
+    final_results.extend([item for item in tracks_list if item.get("tracks") is not None])
+    video_map = {v["video_id"]: v.get("title") for v in videos if "video_id" in v}
+    for item in final_results:
+        item.pop("raw_text", None)
+        video_id = item.get("video_id")
+        if video_id in video_map:
+            item["title"] = video_map[video_id]
+    # 儲存為 JSON
+    json_filename = 'youtube_setlists.json'
+    with open(json_filename, 'w', encoding='utf-8') as f:
+        json.dump(final_results, f, ensure_ascii=False)
+    print(f"\n已順利將結果儲存至 `{json_filename}`")
+if __name__ == '__main__':
+    main()

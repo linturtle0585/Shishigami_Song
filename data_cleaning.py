@@ -2,7 +2,7 @@ import json
 import re
 from collections import Counter, defaultdict
 
-json_filename = 'koyori_setlists'
+json_filename = 'shishigami_setlists'
 
 def normalize_dashes(s):
     """將所有特殊 Unicode 連字號、破折號與全形減號統一替換為標準 ASCII '-' (\u002d)"""
